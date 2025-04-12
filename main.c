@@ -18,14 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "ssd1306.h"
-#include "fonts.h"
-#include <stdio.h>
-
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ssd1306.h"
+#include "fonts.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,16 +43,19 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c2;
 
 /* USER CODE BEGIN PV */
-
+uint16_t adc_data[1];
+uint8_t adc_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
@@ -100,12 +101,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C2_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   SSD1306_Init();
   SSD1306_Clear();
-  HAL_ADCEx_Calibration_Start(&hadc1);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, 1);
+
   /*for (int i = 0; i < 128; i+=16) {
 	  for (int j = 0; j < 50; j++) {
 		  SSD1306_DrawPixel(i, j, SSD1306_COLOR_WHITE);
@@ -121,37 +124,37 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+      if (adc_ready == 1)
+      {
+          float raw = (float)(adc_data[0] * 3.3f) / 4095.0f;
+          sprintf(msg, "%.3f", raw);
 
-	  HAL_Delay(100);
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  float raw = (float)(HAL_ADC_GetValue(&hadc1) * 5) / 4091 ;
-	  //flt_raw = float(raw);
-	  sprintf(msg, "%.3f", raw);
+          SSD1306_GotoXY(0, 0);
+          SSD1306_Puts(msg, &Font_7x10, SSD1306_COLOR_WHITE);
 
-	  // Set cursor position
-	  SSD1306_GotoXY(0, 0);
+          prvx_val = x_val;
+          prvy_val = y_val;
 
-	  // Write ADC reading to OLED
-	  SSD1306_Puts(msg, &Font_7x10, SSD1306_COLOR_WHITE);
+          x_val++;
+          y_val = (raw * 50) / 5;
 
-	  //periode += 100;
-	  //if (periode > 1200) {periode=0;} else {}
-	  prvx_val = x_val;
-	  prvy_val = y_val;
+          if (x_val == 127 || y_val >= 64)
+          {
+              x_val = 0;
+              y_val = 0;
+              SSD1306_Clear();
+          }
+          else
+          {
+              SSD1306_DrawLine(prvx_val, prvy_val, x_val, y_val, SSD1306_COLOR_WHITE);
+          }
 
-	  x_val ++;
-	  y_val = (raw*50)/5;
-	  if (x_val==127 || y_val==64) {x_val=0;y_val=0;SSD1306_Clear();} else{SSD1306_DrawLine(prvx_val, prvy_val, x_val, y_val, SSD1306_COLOR_WHITE);}
+          SSD1306_UpdateScreen();
 
-
-	  // Update OLED display
-	  SSD1306_UpdateScreen();
-
-
-
-
+          adc_ready = 0; // reset the flag
+          HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, 1); // restart DMA
+      }
+      /* USER CODE BEGIN 3 */
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -282,6 +285,22 @@ static void MX_I2C2_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -311,7 +330,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+	UNUSED(hadc);
+	adc_ready = 1;
+}
 /* USER CODE END 4 */
 
 /**
