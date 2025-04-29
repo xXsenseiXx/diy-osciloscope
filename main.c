@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2023 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -21,9 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "ssd1306.h"
-#include "fonts.h"
-#include <stdio.h>
+#include "stdio.h"
+#include "stdlib.h"
+#include "ILI9341_STM32_Driver.h"
+#include "ILI9341_GFX.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,21 +46,29 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
-I2C_HandleTypeDef hi2c2;
+SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 /* USER CODE BEGIN PV */
-uint16_t adc_data[1];
-uint8_t adc_ready = 0;
+uint16_t buffer_len = 3200;
+uint16_t adc_data[320];
+volatile uint8_t adc_ready = 0;
+uint8_t x_val;
+uint16_t y_val;
+char msg[10];
+char v[] = "voltage";
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_I2C2_Init(void);
+static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void plot_graph();
+void draw_line(int x0, int y0, int x1, int y1, uint16_t color);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -75,12 +84,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
-	uint16_t y_val = 0;
-	uint16_t x_val = 0;
-	uint16_t prvy_val = 0;
-	uint16_t prvx_val = 0;
-	char msg[10];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -102,21 +105,79 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_I2C2_Init();
+  MX_SPI1_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  SSD1306_Init();
-  SSD1306_Clear();
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, 1);
+  ILI9341_Init();
 
-  /*for (int i = 0; i < 128; i+=16) {
-	  for (int j = 0; j < 50; j++) {
-		  SSD1306_DrawPixel(i, j, SSD1306_COLOR_WHITE);
-	  }
+  	// Simple Text writing (Text, Font, X, Y, Color, BackColor)
+  	// Available Fonts are FONT1, FONT2, FONT3 and FONT4
+  ILI9341_FillScreen(BLACK);
+  ILI9341_SetRotation(SCREEN_HORIZONTAL_1);
+  ILI9341_DrawText("HELLO WORLD", FONT4, 90, 110, WHITE, BLACK);
+  HAL_Delay(1000);
+  ILI9341_FillScreen(BLACK);
+  for(int i =0; i< 321; i+= 32){
+	  ILI9341_DrawVLine(i, 0, 192, DARKGREY);
   }
-  for (int i = 0; i <= 50; i+=10) {
-	  SSD1306_DrawLine(0, i, 127, i, SSD1306_COLOR_WHITE);
-  }*/
+  for(int i = 0; i< 216; i+= 24){
+  	  ILI9341_DrawHLine(0, i, 320, DARKGREY);
+  }
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
+
+/*
+  	//Writing numbers
+  	ILI9341_FillScreen(BLACK);
+	 static char BufferText[30];
+	 for (uint8_t i = 0; i <= 5; i++) {
+	 sprintf(BufferText, "COUNT : %d", i);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 10, BLACK, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 30, BLUE, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 50, RED, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 70, GREEN, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 90, YELLOW, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 110, PURPLE, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 130, ORANGE, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 150, MAROON, WHITE);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 170, WHITE, BLACK);
+	 ILI9341_DrawText(BufferText, FONT3, 10, 190, BLUE, BLACK);
+	 }
+
+	 // Horizontal Line (X, Y, Length, Color)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawHLine(50, 120, 200, NAVY);
+	 HAL_Delay(1000);
+
+	 // Vertical Line (X, Y, Length, Color)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawVLine(160, 40, 150, DARKGREEN);
+	 HAL_Delay(1000);
+
+	 // Hollow Circle (Centre X, Centre Y, Radius, Color)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawHollowCircle(160, 120, 80, PINK);
+	 HAL_Delay(1000);
+
+	 // Filled Circle (Centre X, Centre Y, Radius, Color)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawFilledCircle(160, 120, 50, CYAN);
+	 HAL_Delay(1000);
+
+	 // Filled Rectangle (Start X, Start Y, Length X, Length Y)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawRectangle(50, 50, 220, 140, GREENYELLOW);
+	 HAL_Delay(1000);
+
+	 // Hollow Rectangle (Start X, Start Y, End X, End Y)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawHollowRectangleCoord(50, 50, 270, 190, DARKCYAN);
+	 HAL_Delay(1000);
+
+	 // Simple Pixel Only (X, Y, Color)
+	 ILI9341_FillScreen(WHITE);
+	 ILI9341_DrawPixel(100, 100, BLACK);
+	 HAL_Delay(1000);*/
+
 
   /* USER CODE END 2 */
 
@@ -124,37 +185,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      if (adc_ready == 1)
-      {
-          float raw = (float)(adc_data[0] * 3.3f) / 4095.0f;
-          sprintf(msg, "%.3f", raw);
+	  if (adc_ready == 1)
+		{
+		  plot_graph();
+		  adc_ready = 0;
+		  //HAL_Delay(100); // Update every 500ms
+		}
+    /* USER CODE END WHILE */
 
-          SSD1306_GotoXY(0, 0);
-          SSD1306_Puts(msg, &Font_7x10, SSD1306_COLOR_WHITE);
-
-          prvx_val = x_val;
-          prvy_val = y_val;
-
-          x_val++;
-          y_val = (raw * 50) / 5;
-
-          if (x_val == 127 || y_val >= 64)
-          {
-              x_val = 0;
-              y_val = 0;
-              SSD1306_Clear();
-          }
-          else
-          {
-              SSD1306_DrawLine(prvx_val, prvy_val, x_val, y_val, SSD1306_COLOR_WHITE);
-          }
-
-          SSD1306_UpdateScreen();
-
-          adc_ready = 0; // reset the flag
-          HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, 1); // restart DMA
-      }
-      /* USER CODE BEGIN 3 */
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -173,10 +211,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV2;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -186,17 +227,17 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -225,7 +266,7 @@ static void MX_ADC1_Init(void)
   */
   hadc1.Instance = ADC1;
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
@@ -251,36 +292,40 @@ static void MX_ADC1_Init(void)
 }
 
 /**
-  * @brief I2C2 Initialization Function
+  * @brief SPI1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C2_Init(void)
+static void MX_SPI1_Init(void)
 {
 
-  /* USER CODE BEGIN I2C2_Init 0 */
+  /* USER CODE BEGIN SPI1_Init 0 */
 
-  /* USER CODE END I2C2_Init 0 */
+  /* USER CODE END SPI1_Init 0 */
 
-  /* USER CODE BEGIN I2C2_Init 1 */
+  /* USER CODE BEGIN SPI1_Init 1 */
 
-  /* USER CODE END I2C2_Init 1 */
-  hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 400000;
-  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c2.Init.OwnAddress1 = 0;
-  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c2.Init.OwnAddress2 = 0;
-  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN I2C2_Init 2 */
+  /* USER CODE BEGIN SPI1_Init 2 */
 
-  /* USER CODE END I2C2_Init 2 */
+  /* USER CODE END SPI1_Init 2 */
 
 }
 
@@ -297,6 +342,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
 
 }
 
@@ -312,18 +360,29 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LCD_RST_Pin|LCD_DC_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : PA10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : LCD_RST_Pin LCD_DC_Pin */
+  GPIO_InitStruct.Pin = LCD_RST_Pin|LCD_DC_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LCD_CS_Pin */
+  GPIO_InitStruct.Pin = LCD_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(LCD_CS_GPIO_Port, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -332,8 +391,62 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-	UNUSED(hadc);
 	adc_ready = 1;
+}
+void draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy, e2;
+
+    while (1) {
+        ILI9341_DrawPixel(x0, y0, color);
+        if (x0 == x1 && y0 == y1) break;
+        e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+void plot_graph() {
+    static int prev_y[320] = {0}; // Store previous y values
+    static uint8_t first_run = 1;
+
+    // Only clear the grid area on first run
+    if(first_run) {
+        ILI9341_DrawFilledRectangleCoord(0, 0, 320, 192, BLACK);
+        // Draw grid (only once or when needed)
+        for (int i = 0; i < 321; i += 32) {
+            ILI9341_DrawVLine(i, 0, 192, DARKGREY);
+        }
+        for (int i = 0; i < 216; i += 24) {
+            ILI9341_DrawHLine(0, i, 320, DARKGREY);
+        }
+        first_run = 0;
+    }
+
+    // Show last voltage reading
+    float last_voltage = (float)(adc_data[buffer_len - 1] * 3.3) / 4095;
+    sprintf(msg, "V: %.2fV", last_voltage);
+    ILI9341_DrawText(msg, FONT4, 5, 200, WHITE, BLACK);
+
+    // First pass: Erase previous waveform by drawing black over it
+    for (int i = 1; i < buffer_len; i++) {
+        if(prev_y[i] != 0 && prev_y[i-1] != 0 ) {
+            draw_line(i-1, prev_y[i-1], i, prev_y[i], BLACK);
+        }
+    }
+    // Second pass: Draw new waveform and store positions
+    for (int i = 0; i < buffer_len; i++) {
+        float raw = (float)(adc_data[i] * 3.3) / 4095.0;
+        int x_val = i;
+        int y_val = 192 - (int)(raw * 192.0 / 3.3);
+
+        if (i > 0) {
+            draw_line(x_val-1, prev_y[i-1], x_val, y_val, RED);
+        }
+
+        prev_y[i] = y_val; // Store current y position
+    }
 }
 /* USER CODE END 4 */
 
