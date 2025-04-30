@@ -49,14 +49,22 @@ DMA_HandleTypeDef hdma_adc1;
 SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_tx;
 
+TIM_HandleTypeDef htim3;
+
 /* USER CODE BEGIN PV */
-uint16_t buffer_len = 3200;
+uint16_t buffer_len = 320;
 uint16_t adc_data[320];
 volatile uint8_t adc_ready = 0;
 uint8_t x_val;
 uint16_t y_val;
 char msg[10];
 char v[] = "voltage";
+uint32_t sampleStartTime, sampleEndTime;
+float actualSamplingFreq;
+
+float sampling_frequency = 1000.0; // Adjust based on your actual sampling rate
+uint32_t zero_crossings = 0;
+float measured_frequency = 0.0;
 
 /* USER CODE END PV */
 
@@ -66,9 +74,11 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void plot_graph();
 void draw_line(int x0, int y0, int x1, int y1, uint16_t color);
+float calculate_frequency(uint16_t *samples, uint16_t count);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -107,8 +117,10 @@ int main(void)
   MX_DMA_Init();
   MX_SPI1_Init();
   MX_ADC1_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   ILI9341_Init();
+  //HAL_ADCEx_Calibration_Start(&hadc1);
 
   	// Simple Text writing (Text, Font, X, Y, Color, BackColor)
   	// Available Fonts are FONT1, FONT2, FONT3 and FONT4
@@ -123,7 +135,9 @@ int main(void)
   for(int i = 0; i< 216; i+= 24){
   	  ILI9341_DrawHLine(0, i, 320, DARKGREY);
   }
+  //HAL_TIM_Base_Start(&htim3);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
+  //sampleStartTime = HAL_GetTick();
 
 /*
   	//Writing numbers
@@ -189,6 +203,8 @@ int main(void)
 		{
 		  plot_graph();
 		  adc_ready = 0;
+
+		  HAL_Delay(10);
 		  //HAL_Delay(100); // Update every 500ms
 		}
     /* USER CODE END WHILE */
@@ -217,7 +233,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -237,7 +253,7 @@ void SystemClock_Config(void)
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV4;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -330,6 +346,51 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 56;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 100;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -391,6 +452,10 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
+	//sampleEndTime = HAL_GetTick();
+	//uint32_t deltaT = sampleEndTime - sampleStartTime;
+	//actualSamplingFreq = (float)buffer_len / (deltaT * 0.001f); // in Hz
+	//sampleStartTime = sampleEndTime;
 	adc_ready = 1;
 }
 void draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
@@ -447,6 +512,59 @@ void plot_graph() {
 
         prev_y[i] = y_val; // Store current y position
     }
+
+   //char info_msg[40];
+   //sprintf(info_msg, "Fs: %.1fkHz", actualSamplingFreq/1000);
+   //ILI9341_DrawText(info_msg, FONT2, 200, 200, CYAN, BLACK);
+
+
+   float current_freq = calculate_frequency(adc_data, 300);
+   char frq[20];
+   sprintf(frq, "Freq: %.1f Hz", current_freq);
+   ILI9341_DrawText(frq, FONT2, 160, 200, WHITE, BLACK);
+}
+float calculate_frequency(uint16_t *samples, uint16_t count) {
+    // Use the measured sampling rate
+    static float last_valid_freq = 0.0f;
+
+    if (actualSamplingFreq == 0) return 0; // No measurements yet
+
+    // Count zero crossings
+    zero_crossings = 0;
+    //int prev_sign = 0;
+    float mean = 0.0f;
+
+    // Calculate mean to determine zero crossing threshold
+    for (uint16_t i = 0; i < count; i++) {
+        mean += samples[i];
+    }
+    mean /= count;
+
+    // Detect zero crossings
+    for (uint16_t i = 1; i < count; i++) {
+        float val_prev = samples[i - 1] - mean;
+        float val_curr = samples[i] - mean;
+
+        // Check for sign change (zero crossing)
+        if (val_prev < 0 && val_curr >= 0) {
+            zero_crossings++;
+        } else if (val_prev >= 0 && val_curr < 0) {
+            zero_crossings++;
+        }
+    }
+
+    // Calculate frequency: (number of zero crossings / 2) gives number of cycles
+    // Frequency = (cycles * sampling frequency) / number of samples
+    float calculated_freq = (actualSamplingFreq * zero_crossings) / (2.0f * count);
+
+    // Basic validation: frequency should be positive and less than Nyquist limit
+    if (calculated_freq > 0 && calculated_freq < actualSamplingFreq / 2) {
+        last_valid_freq = calculated_freq;
+    } else {
+        calculated_freq = 0.0f; // Invalid frequency, return 0
+    }
+
+    return last_valid_freq;
 }
 /* USER CODE END 4 */
 
