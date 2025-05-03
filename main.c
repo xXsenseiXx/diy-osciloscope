@@ -52,19 +52,17 @@ DMA_HandleTypeDef hdma_spi1_tx;
 TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
-uint16_t buffer_len = 320;
-uint16_t adc_data[320];
+uint16_t buffer_len = 3200;
+uint16_t adc_data[3200];
 volatile uint8_t adc_ready = 0;
-uint8_t x_val;
-uint16_t y_val;
+int x_val;
+int y_val;
+int x_val_prev = 0;
+int y_val_prev = 0;
+
 char msg[10];
 char v[] = "voltage";
-uint32_t sampleStartTime, sampleEndTime;
-float actualSamplingFreq;
-
-float sampling_frequency = 1000.0; // Adjust based on your actual sampling rate
-uint32_t zero_crossings = 0;
-float measured_frequency = 0.0;
+uint32_t elapsed_us;
 
 /* USER CODE END PV */
 
@@ -78,7 +76,6 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void plot_graph();
 void draw_line(int x0, int y0, int x1, int y1, uint16_t color);
-float calculate_frequency(uint16_t *samples, uint16_t count);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -120,7 +117,6 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   ILI9341_Init();
-  //HAL_ADCEx_Calibration_Start(&hadc1);
 
   	// Simple Text writing (Text, Font, X, Y, Color, BackColor)
   	// Available Fonts are FONT1, FONT2, FONT3 and FONT4
@@ -135,62 +131,11 @@ int main(void)
   for(int i = 0; i< 216; i+= 24){
   	  ILI9341_DrawHLine(0, i, 320, DARKGREY);
   }
-  //HAL_TIM_Base_Start(&htim3);
+
+  __HAL_TIM_SET_COUNTER(&htim3, 0);
+  HAL_TIM_Base_Start(&htim3);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
-  //sampleStartTime = HAL_GetTick();
 
-/*
-  	//Writing numbers
-  	ILI9341_FillScreen(BLACK);
-	 static char BufferText[30];
-	 for (uint8_t i = 0; i <= 5; i++) {
-	 sprintf(BufferText, "COUNT : %d", i);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 10, BLACK, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 30, BLUE, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 50, RED, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 70, GREEN, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 90, YELLOW, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 110, PURPLE, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 130, ORANGE, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 150, MAROON, WHITE);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 170, WHITE, BLACK);
-	 ILI9341_DrawText(BufferText, FONT3, 10, 190, BLUE, BLACK);
-	 }
-
-	 // Horizontal Line (X, Y, Length, Color)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawHLine(50, 120, 200, NAVY);
-	 HAL_Delay(1000);
-
-	 // Vertical Line (X, Y, Length, Color)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawVLine(160, 40, 150, DARKGREEN);
-	 HAL_Delay(1000);
-
-	 // Hollow Circle (Centre X, Centre Y, Radius, Color)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawHollowCircle(160, 120, 80, PINK);
-	 HAL_Delay(1000);
-
-	 // Filled Circle (Centre X, Centre Y, Radius, Color)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawFilledCircle(160, 120, 50, CYAN);
-	 HAL_Delay(1000);
-
-	 // Filled Rectangle (Start X, Start Y, Length X, Length Y)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawRectangle(50, 50, 220, 140, GREENYELLOW);
-	 HAL_Delay(1000);
-
-	 // Hollow Rectangle (Start X, Start Y, End X, End Y)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawHollowRectangleCoord(50, 50, 270, 190, DARKCYAN);
-	 HAL_Delay(1000);
-
-	 // Simple Pixel Only (X, Y, Color)
-	 ILI9341_FillScreen(WHITE);
-	 ILI9341_DrawPixel(100, 100, BLACK);
-	 HAL_Delay(1000);*/
 
 
   /* USER CODE END 2 */
@@ -201,11 +146,13 @@ int main(void)
   {
 	  if (adc_ready == 1)
 		{
+		  HAL_ADC_Stop_DMA(&hadc1);
+		  char sampling[10];
+		  sprintf(sampling, "speed: %ld", elapsed_us);
+		  ILI9341_DrawText(sampling, FONT2, 180, 200, WHITE, BLACK);
 		  plot_graph();
 		  adc_ready = 0;
-
-		  HAL_Delay(10);
-		  //HAL_Delay(100); // Update every 500ms
+		  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
 		}
     /* USER CODE END WHILE */
 
@@ -229,7 +176,7 @@ void SystemClock_Config(void)
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV2;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
@@ -364,9 +311,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 56;
+  htim3.Init.Prescaler = 55;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 100;
+  htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -452,10 +399,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-	//sampleEndTime = HAL_GetTick();
-	//uint32_t deltaT = sampleEndTime - sampleStartTime;
-	//actualSamplingFreq = (float)buffer_len / (deltaT * 0.001f); // in Hz
-	//sampleStartTime = sampleEndTime;
+	elapsed_us = __HAL_TIM_GET_COUNTER(&htim3);
+	HAL_TIM_Base_Stop(&htim3);
 	adc_ready = 1;
 }
 void draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
@@ -490,18 +435,18 @@ void plot_graph() {
     }
 
     // Show last voltage reading
-    float last_voltage = (float)(adc_data[buffer_len - 1] * 3.3) / 4095;
+    float last_voltage = (float)(adc_data[320 - 1] * 3.3) / 4095;
     sprintf(msg, "V: %.2fV", last_voltage);
     ILI9341_DrawText(msg, FONT4, 5, 200, WHITE, BLACK);
 
     // First pass: Erase previous waveform by drawing black over it
-    for (int i = 1; i < buffer_len; i++) {
+    for (int i = 1; i < 320; i++) {
         if(prev_y[i] != 0 && prev_y[i-1] != 0 ) {
             draw_line(i-1, prev_y[i-1], i, prev_y[i], BLACK);
         }
     }
     // Second pass: Draw new waveform and store positions
-    for (int i = 0; i < buffer_len; i++) {
+    for (int i = 0; i < 320; i++) {
         float raw = (float)(adc_data[i] * 3.3) / 4095.0;
         int x_val = i;
         int y_val = 192 - (int)(raw * 192.0 / 3.3);
@@ -512,59 +457,6 @@ void plot_graph() {
 
         prev_y[i] = y_val; // Store current y position
     }
-
-   //char info_msg[40];
-   //sprintf(info_msg, "Fs: %.1fkHz", actualSamplingFreq/1000);
-   //ILI9341_DrawText(info_msg, FONT2, 200, 200, CYAN, BLACK);
-
-
-   float current_freq = calculate_frequency(adc_data, 300);
-   char frq[20];
-   sprintf(frq, "Freq: %.1f Hz", current_freq);
-   ILI9341_DrawText(frq, FONT2, 160, 200, WHITE, BLACK);
-}
-float calculate_frequency(uint16_t *samples, uint16_t count) {
-    // Use the measured sampling rate
-    static float last_valid_freq = 0.0f;
-
-    if (actualSamplingFreq == 0) return 0; // No measurements yet
-
-    // Count zero crossings
-    zero_crossings = 0;
-    //int prev_sign = 0;
-    float mean = 0.0f;
-
-    // Calculate mean to determine zero crossing threshold
-    for (uint16_t i = 0; i < count; i++) {
-        mean += samples[i];
-    }
-    mean /= count;
-
-    // Detect zero crossings
-    for (uint16_t i = 1; i < count; i++) {
-        float val_prev = samples[i - 1] - mean;
-        float val_curr = samples[i] - mean;
-
-        // Check for sign change (zero crossing)
-        if (val_prev < 0 && val_curr >= 0) {
-            zero_crossings++;
-        } else if (val_prev >= 0 && val_curr < 0) {
-            zero_crossings++;
-        }
-    }
-
-    // Calculate frequency: (number of zero crossings / 2) gives number of cycles
-    // Frequency = (cycles * sampling frequency) / number of samples
-    float calculated_freq = (actualSamplingFreq * zero_crossings) / (2.0f * count);
-
-    // Basic validation: frequency should be positive and less than Nyquist limit
-    if (calculated_freq > 0 && calculated_freq < actualSamplingFreq / 2) {
-        last_valid_freq = calculated_freq;
-    } else {
-        calculated_freq = 0.0f; // Invalid frequency, return 0
-    }
-
-    return last_valid_freq;
 }
 /* USER CODE END 4 */
 
