@@ -34,7 +34,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BUFFER_LEN 320
+#define SAMPLING_RATE 844000 // Measured sampling rate (Hz)
+#define TIME_WINDOW_US 379 // Time for 320 samples at 844 ksps (µs)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,21 +51,21 @@ DMA_HandleTypeDef hdma_adc1;
 SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_tx;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
-uint16_t buffer_len = 3200;
-uint16_t adc_data[3200];
+uint16_t buffer_len = BUFFER_LEN;
+uint16_t adc_data[BUFFER_LEN];
 volatile uint8_t adc_ready = 0;
 int x_val;
 int y_val;
 int x_val_prev = 0;
 int y_val_prev = 0;
 
-char msg[10];
+char msg[16];
 char v[] = "voltage";
 uint32_t elapsed_us;
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -72,10 +74,12 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void plot_graph();
 void draw_line(int x0, int y0, int x1, int y1, uint16_t color);
+float calculate_frequency(uint16_t* adc_data, uint16_t len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -99,14 +103,12 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -114,29 +116,25 @@ int main(void)
   MX_DMA_Init();
   MX_SPI1_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   ILI9341_Init();
-
-  	// Simple Text writing (Text, Font, X, Y, Color, BackColor)
-  	// Available Fonts are FONT1, FONT2, FONT3 and FONT4
   ILI9341_FillScreen(BLACK);
   ILI9341_SetRotation(SCREEN_HORIZONTAL_1);
   ILI9341_DrawText("HELLO WORLD", FONT4, 90, 110, WHITE, BLACK);
   HAL_Delay(1000);
   ILI9341_FillScreen(BLACK);
-  for(int i =0; i< 321; i+= 32){
-	  ILI9341_DrawVLine(i, 0, 192, DARKGREY);
+  for(int i = 0; i < 321; i += 32) {
+      ILI9341_DrawVLine(i, 0, 192, DARKGREY);
   }
-  for(int i = 0; i< 216; i+= 24){
-  	  ILI9341_DrawHLine(0, i, 320, DARKGREY);
+  for(int i = 0; i < 216; i += 24) {
+      ILI9341_DrawHLine(0, i, 320, DARKGREY);
   }
 
   __HAL_TIM_SET_COUNTER(&htim3, 0);
   HAL_TIM_Base_Start(&htim3);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
-
-
 
   /* USER CODE END 2 */
 
@@ -144,16 +142,16 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (adc_ready == 1)
-		{
-		  HAL_ADC_Stop_DMA(&hadc1);
-		  char sampling[10];
-		  sprintf(sampling, "speed: %ld", elapsed_us);
-		  ILI9341_DrawText(sampling, FONT2, 180, 200, WHITE, BLACK);
-		  plot_graph();
-		  adc_ready = 0;
-		  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
-		}
+      if (adc_ready == 1)
+      {
+          HAL_ADC_Stop_DMA(&hadc1);
+          char sampling[16];
+          sprintf(sampling, "speed: %ld us", elapsed_us);
+          ILI9341_DrawText(sampling, FONT2, 180, 200, WHITE, BLACK);
+          plot_graph();
+          adc_ready = 0;
+          HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_data, buffer_len);
+      }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -293,6 +291,55 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_FALLING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_FALLING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -399,11 +446,13 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-	elapsed_us = __HAL_TIM_GET_COUNTER(&htim3);
-	HAL_TIM_Base_Stop(&htim3);
-	adc_ready = 1;
+    elapsed_us = __HAL_TIM_GET_COUNTER(&htim3);
+    HAL_TIM_Base_Stop(&htim3);
+    adc_ready = 1;
 }
-void draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
+
+void draw_line(int x0, int y0, int x1, int y1, uint16_t color)
+{
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy, e2;
@@ -417,14 +466,33 @@ void draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
     }
 }
 
-void plot_graph() {
-    static int prev_y[320] = {0}; // Store previous y values
+float calculate_frequency(uint16_t* adc_data, uint16_t len)
+{
+    if (len < 2) return 0.0;
+    int zero_crossings = 0;
+    uint16_t midpoint = 2048; // Midpoint for 3.3V range (4095/2)
+    uint16_t threshold = 100; // Noise threshold (~80 mV)
+
+    for (int i = 1; i < len; i++) {
+        if (adc_data[i-1] < midpoint - threshold && adc_data[i] > midpoint + threshold) {
+            zero_crossings++;
+        } else if (adc_data[i-1] > midpoint + threshold && adc_data[i] < midpoint - threshold) {
+            zero_crossings++;
+        }
+    }
+
+    float cycles = (float)zero_crossings / 2.0;
+    if (cycles < 0.5) return 0.0; // Not enough cycles
+    return (cycles / TIME_WINDOW_US) * 1e6; // Frequency in Hz
+}
+
+void plot_graph()
+{
+    static int prev_y[BUFFER_LEN] = {0};
     static uint8_t first_run = 1;
 
-    // Only clear the grid area on first run
-    if(first_run) {
+    if (first_run) {
         ILI9341_DrawFilledRectangleCoord(0, 0, 320, 192, BLACK);
-        // Draw grid (only once or when needed)
         for (int i = 0; i < 321; i += 32) {
             ILI9341_DrawVLine(i, 0, 192, DARKGREY);
         }
@@ -434,28 +502,33 @@ void plot_graph() {
         first_run = 0;
     }
 
-    // Show last voltage reading
-    float last_voltage = (float)(adc_data[320 - 1] * 3.3) / 4095;
-    sprintf(msg, "V: %.2fV", last_voltage);
-    ILI9341_DrawText(msg, FONT4, 5, 200, WHITE, BLACK);
+    // Calculate and display frequency
+    float freq_hz = calculate_frequency(adc_data, BUFFER_LEN);
+    sprintf(msg, "freq: %.1f kHz", freq_hz / 1000.0);
+    ILI9341_DrawText(msg, FONT2, 5, 220, WHITE, BLACK);
 
-    // First pass: Erase previous waveform by drawing black over it
-    for (int i = 1; i < 320; i++) {
-        if(prev_y[i] != 0 && prev_y[i-1] != 0 ) {
+    // Show last voltage reading
+    float last_voltage = (float)(adc_data[BUFFER_LEN - 1] * 3.3) / 4095;
+    sprintf(msg, "V: %.2fV", last_voltage);
+    ILI9341_DrawText(msg, FONT2, 5, 200, WHITE, BLACK);
+
+    // Erase previous waveform
+    for (int i = 1; i < BUFFER_LEN; i++) {
+        if (prev_y[i] != 0 && prev_y[i-1] != 0) {
             draw_line(i-1, prev_y[i-1], i, prev_y[i], BLACK);
         }
     }
-    // Second pass: Draw new waveform and store positions
-    for (int i = 0; i < 320; i++) {
+
+    // Draw new waveform
+    for (int i = 0; i < BUFFER_LEN; i++) {
         float raw = (float)(adc_data[i] * 3.3) / 4095.0;
         int x_val = i;
         int y_val = 192 - (int)(raw * 192.0 / 3.3);
 
         if (i > 0) {
-            draw_line(x_val-1, prev_y[i-1], x_val, y_val, RED);
+            draw_line(i-1, prev_y[i-1], x_val, y_val, RED);
         }
-
-        prev_y[i] = y_val; // Store current y position
+        prev_y[i] = y_val;
     }
 }
 /* USER CODE END 4 */
